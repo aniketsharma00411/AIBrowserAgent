@@ -7,16 +7,15 @@ import json
 import base64
 import datetime
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 
 class BrowserAgent:
     def __init__(self):
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.playwright = None
         self.browser = None
         self.context = None
         self.page = None
+        self.chat_history = []
 
     async def start(self):
         self.playwright = await async_playwright().start()
@@ -68,7 +67,7 @@ class BrowserAgent:
         if self.playwright:
             await self.playwright.stop()
 
-    async def get_page_info(self) -> Dict[str, Any]:
+    async def get_page_info(self, extract_data: str | None = None) -> Dict[str, Any]:
         """Gather minimal information about the current page state with screenshot."""
         try:
             # Get the current URL and title
@@ -88,21 +87,28 @@ class BrowserAgent:
             screenshot_base64 = base64.b64encode(
                 page_screenshot).decode('utf-8')
 
+            data = None
+            if extract_data:
+                extract_result = await self.extract(extract_data)
+                if extract_result["status"] == "success":
+                    data = extract_result["data"][:50]
+
             return {
                 "url": current_url,
                 "title": title,
-                "screenshot": screenshot_base64
+                "screenshot": screenshot_base64,
+                "data": data
             }
         except Exception as e:
             return {"error": str(e)}
 
     async def execute_command(self, command: str) -> Dict[str, Any]:
         try:
-            conversation_history = []
             page_info = None
             run_agent = True
             max_iterations = 10
             iteration = 0
+
             while iteration < max_iterations and run_agent:
                 iteration += 1
 
@@ -122,7 +128,16 @@ class BrowserAgent:
                                 - url: The url to navigate to.  The value of the key will be the input to the goto function of playwright.
                                 - selector: Click on the element. The value of the key will be the input to the fill function of playwright.
                                 - text: The text to type. The value of the key will be the input to the fill function of playwright.
+                                - submit_selector: The selector for the login/submit button
+                            - login: Perform login action. For this we will have the following keys in the json:
+                                - url: The login page URL
+                                - username_selector: The selector for the username/email field
+                                - password_selector: The selector for the password field
+                                - username: The username/email to enter
+                                - password: The password to enter
+                                - submit_selector: The selector for the login/submit button
                         - needs_page_info: A boolean indicating whether you need to see the current page state before proceeding. If the user command has been executed, set this to false. Only set this to true if the user command has not been executed, confirm this from the screenshot.
+                        - extract_data: If needs_page_info is true, then you need to extract data from the page. Give a natural language description of the data you need to extract, this will be passed to another AI agent to extract the data based on the selector and attribute. This is required if needs_page_info is true.
 
                         Extra Information:
                         - If you are trying to input something at google.com then the selector is "textarea[name="q"]"
@@ -133,11 +148,20 @@ class BrowserAgent:
                 # Add the user's command
                 messages.append({"role": "user", "content": command})
 
-                # Add conversation history with up to 5 messages
-                for msg in conversation_history[-5:]:
-                    messages.append(msg)
+                # Keep last 10 messages for context
+                for msg in self.chat_history[-10:]:
+                    # Ensure content is a string
+                    content = msg.get("content", None)
+                    if isinstance(content, dict):
+                        content = json.dumps(content)
+                    elif isinstance(content, list):
+                        content = json.dumps(content)
 
-                print(messages)
+                    if content is not None:
+                        messages.append({
+                            "role": msg["role"],
+                            "content": content
+                        })
 
                 # Add page information if provided
                 if page_info:
@@ -146,7 +170,8 @@ class BrowserAgent:
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Current URL: {page_info['url']}\nCurrent Title: {page_info['title']}"
+                                "text": f"Current URL: {page_info['url']}\nCurrent Title: {page_info['title']}",
+                                "extract_data": page_info["data"]
                             },
                             {
                                 "type": "image_url",
@@ -159,11 +184,11 @@ class BrowserAgent:
                     })
 
                 # Get response from OpenAI
-                response = client.chat.completions.create(
+                response = self.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=messages
                 )
-                conversation_history.append({
+                self.chat_history.append({
                     "role": "assistant",
                     "content": response.choices[0].message.content.strip()
                 })
@@ -176,7 +201,7 @@ class BrowserAgent:
                 except json.JSONDecodeError as e:
                     print(f"JSON parsing error: {str(e)}")
                     print(f"Invalid JSON content: {content}")
-                    conversation_history.append({
+                    self.chat_history.append({
                         "role": "user",
                         "content": f"Failed to parse AI response: {str(e)}"
                     })
@@ -195,9 +220,14 @@ class BrowserAgent:
                         await self.page.fill(parsed_command["selector"], parsed_command["text"])
                         await self.page.keyboard.press("Enter")
                         await self.page.wait_for_selector("div#search")
+                    elif parsed_command["action"] == "login":
+                        await self.page.goto(parsed_command["url"])
+                        await self.page.fill(parsed_command["username_selector"], parsed_command["username"])
+                        await self.page.fill(parsed_command["password_selector"], parsed_command["password"])
+                        await self.page.keyboard.press("Enter")
                 except Exception as e:
                     print(f"Command execution error: {str(e)}")
-                    conversation_history.append({
+                    self.chat_history.append({
                         "role": "user",
                         "content": f"Failed to execute command: {str(e)}"
                     })
@@ -212,7 +242,7 @@ class BrowserAgent:
             return {
                 "status": "success",
                 "message": f"Executed command: {command}",
-                "conversation_history": conversation_history
+                "conversation_history": self.chat_history
             }
 
         except Exception as e:
@@ -314,7 +344,7 @@ class BrowserAgent:
             ]
 
             # Get response from OpenAI
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages
             )

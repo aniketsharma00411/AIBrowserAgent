@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Browser Automation Chat</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background-color: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                padding: 20px;
+            }
+
+            .chat-container {
+                height: 400px;
+                overflow-y: auto;
+                border: 1px solid #ddd;
+                padding: 10px;
+                margin-bottom: 20px;
+                border-radius: 4px;
+            }
+
+            .message {
+                margin-bottom: 10px;
+                padding: 8px;
+                border-radius: 4px;
+            }
+
+            .user-message {
+                background-color: #e3f2fd;
+                margin-left: 20px;
+            }
+
+            .assistant-message {
+                background-color: #f5f5f5;
+                margin-right: 20px;
+            }
+
+            .input-container {
+                display: flex;
+                gap: 10px;
+            }
+
+            input {
+                flex-grow: 1;
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+
+            button {
+                padding: 8px 16px;
+                background-color: #2196f3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            button:hover {
+                background-color: #1976d2;
+            }
+
+            .status {
+                margin-top: 10px;
+                padding: 8px;
+                border-radius: 4px;
+            }
+
+            .status.error {
+                background-color: #ffebee;
+                color: #c62828;
+            }
+
+            .status.success {
+                background-color: #e8f5e9;
+                color: #2e7d32;
+            }
+
+            pre {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+
+            .chat-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+
+            .header-buttons {
+                display: flex;
+                gap: 10px;
+            }
+
+            .button {
+                padding: 8px 16px;
+                background-color: #2196f3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            .button:hover {
+                background-color: #1976d2;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <div class="chat-header">
+                <h1>Browser Automation AI Agent</h1>
+                <div class="header-buttons">
+                    <button id="repeatProcess" class="button">Repeat Process</button>
+                    <button id="newChat" class="button">New Chat</button>
+                </div>
+            </div>
+            <div id="status" class="status"></div>
+            <div id="chat-container" class="chat-container"></div>
+            <div class="input-container">
+                <input type="text" id="message-input" placeholder="Type your command..."
+                    onkeypress="if(event.key === 'Enter') sendMessage()">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+
+        <script>
+            let chatId = null;
+            let ws = null;
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
+            let messageQueue = [];
+            let isRepeating = false;
+
+            function updateStatus(message, isError = false) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.textContent = message;
+                statusDiv.className = 'status ' + (isError ? 'error' : 'success');
+                console.log(`Status update (${isError ? 'error' : 'info'}):`, message);
+            }
+
+            function appendMessage(role, content) {
+                const chatContainer = document.getElementById('chat-container');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${role}-message`;
+
+                try {
+                    // Try to parse and prettify JSON content
+                    const parsedContent = typeof content === 'string' ? JSON.parse(content) : content;
+                    messageDiv.innerHTML = `<pre>${JSON.stringify(parsedContent, null, 2)}</pre>`;
+                } catch (e) {
+                    // If not JSON, display as plain text
+                    messageDiv.textContent = content;
+                }
+
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            async function connectWebSocket() {
+                if (!chatId) {
+                    console.error("No chat ID available");
+                    return;
+                }
+
+                if (ws) {
+                    ws.close();
+                }
+
+                if (reconnectAttempts >= maxReconnectAttempts) {
+                    updateStatus('Maximum reconnection attempts reached. Please refresh the page.', true);
+                    return;
+                }
+
+                try {
+                    updateStatus('Connecting to WebSocket...');
+                    // Use the current window location to construct the WebSocket URL
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/api/ws/chat/${chatId}`;
+                    console.log(`Attempting WebSocket connection (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts}):`, wsUrl);
+
+                    ws = new WebSocket(wsUrl);
+
+                    ws.onopen = () => {
+                        console.log('WebSocket connected successfully');
+                        updateStatus('Connected');
+                        reconnectAttempts = 0;
+                        loadChatHistory();
+                    };
+
+                    ws.onmessage = (event) => {
+                        try {
+                            console.log('Received WebSocket message:', event.data);
+                            const response = JSON.parse(event.data);
+                            if (response.status === 'success') {
+                                appendMessage('assistant', response.result);
+                            } else {
+                                console.error('Error in WebSocket message:', response);
+                                updateStatus(`Error: ${response.message}`, true);
+                            }
+                        } catch (error) {
+                            console.error('Error handling WebSocket message:', error);
+                            updateStatus(`Error processing message: ${error.message}`, true);
+                        }
+                    };
+
+                    ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        updateStatus('Connection error occurred', true);
+                    };
+
+                    ws.onclose = (event) => {
+                        console.log('WebSocket closed:', event);
+                        updateStatus('Disconnected', true);
+                        reconnectAttempts++;
+                        if (reconnectAttempts < maxReconnectAttempts) {
+                            console.log(`Attempting to reconnect in 5 seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                            setTimeout(connectWebSocket, 5000);
+                        }
+                    };
+
+                } catch (error) {
+                    console.error('Error in connectWebSocket:', error);
+                    updateStatus(`Connection error: ${error.message}`, true);
+                    reconnectAttempts++;
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        setTimeout(connectWebSocket, 5000);
+                    }
+                }
+            }
+
+            async function loadChatHistory() {
+                if (!chatId) return;
+
+                try {
+                    console.log('Loading chat history for chat ID:', chatId);
+                    const response = await fetch(`/api/chat/${chatId}/history`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    console.log('Loaded chat history:', data);
+
+                    const chatContainer = document.getElementById('chat-container');
+                    chatContainer.innerHTML = '';
+
+                    if (data.messages && data.messages.length > 0) {
+                        data.messages.forEach(msg => {
+                            appendMessage(msg.role, msg.content);
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error loading chat history:', error);
+                    updateStatus(`Error loading chat history: ${error.message}`, true);
+                }
+            }
+
+            async function sendMessage() {
+                const input = document.getElementById('message-input');
+                const message = input.value.trim();
+
+                if (!message) {
+                    updateStatus('Please enter a message', true);
+                    return;
+                }
+
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    console.log('WebSocket not ready. Current state:', ws ? ws.readyState : 'null');
+                    updateStatus('Not connected. Attempting to reconnect...', true);
+                    connectWebSocket();
+                    return;
+                }
+
+                try {
+                    console.log('Sending message:', message);
+                    appendMessage('user', message);
+                    ws.send(JSON.stringify({
+                        chat_id: chatId,
+                        content: message
+                    }));
+                    input.value = '';
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    updateStatus(`Error sending message: ${error.message}`, true);
+                }
+            }
+
+            async function repeatProcess() {
+                try {
+                    // First, create a new chat
+                    const response = await fetch(`/api/chat/${chatId}/repeat`, {
+                        method: 'POST'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to repeat process');
+                    }
+
+                    const result = await response.json();
+                    console.log('Repeat process started:', result);
+
+                    // Store the original chat ID before updating
+                    const sourceChatId = chatId;
+
+                    // Update chat ID and redirect to new chat
+                    chatId = result.new_chat_id;
+                    window.history.pushState({}, '', `/chat/${chatId}`);
+
+                    // Clear chat container
+                    const chatContainer = document.getElementById('chat-container');
+                    chatContainer.innerHTML = '';
+
+                    // Process messages interactively
+                    let messageIndex = 0;
+                    let isProcessing = true;
+
+                    async function processNextMessage() {
+                        if (!isProcessing) return;
+
+                        try {
+                            // First get the message from source chat
+                            const historyResponse = await fetch(`/api/chat/${sourceChatId}/history`);
+                            if (!historyResponse.ok) {
+                                throw new Error('Failed to get chat history');
+                            }
+                            const historyData = await historyResponse.json();
+                            const userMessages = historyData.messages.filter(msg => msg.role === 'user');
+
+                            if (messageIndex >= userMessages.length) {
+                                updateStatus('All messages processed successfully');
+                                isProcessing = false;
+                                return;
+                            }
+
+                            // Get the next message
+                            const message = userMessages[messageIndex];
+
+                            // Show user message in UI first
+                            appendMessage('user', message.content);
+
+                            // Then process the message
+                            const processResponse = await fetch(`/api/chat/${chatId}/process_next_message`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    source_chat_id: sourceChatId,
+                                    message_index: messageIndex
+                                })
+                            });
+
+                            const processResult = await processResponse.json();
+                            console.log('Processed message:', processResult);
+
+                            if (processResult.status === 'complete') {
+                                updateStatus('All messages processed successfully');
+                                isProcessing = false;
+                                return;
+                            }
+
+                            if (processResult.status === 'error') {
+                                console.error('Error processing message:', processResult.message);
+                                updateStatus(`Error processing message: ${processResult.message}`, true);
+                                // Continue with next message
+                                messageIndex = processResult.next_index;
+                                setTimeout(processNextMessage, 1000);
+                                return;
+                            }
+
+                            // Show assistant's response in UI
+                            if (processResult.response && processResult.response.result) {
+                                appendMessage('assistant', processResult.response.result);
+                            }
+
+                            // Update message index and continue processing
+                            messageIndex = processResult.next_index;
+                            setTimeout(processNextMessage, 1000); // Process next message after 1 second
+                        } catch (error) {
+                            console.error('Error processing message:', error);
+                            updateStatus(`Error processing message: ${error.message}`, true);
+                            isProcessing = false;
+                        }
+                    }
+
+                    // Start processing messages
+                    updateStatus('Processing messages...');
+                    await processNextMessage();
+
+                } catch (error) {
+                    console.error('Error repeating process:', error);
+                    updateStatus(`Failed to repeat process: ${error.message}`, true);
+                }
+            }
+
+            // Add event listeners for buttons
+            document.getElementById('repeatProcess').addEventListener('click', repeatProcess);
+            document.getElementById('newChat').addEventListener('click', () => window.location.href = '/chat/new');
+
+            // Initialize chat when page loads
+            const path = window.location.pathname;
+            console.log('Current path:', path);
+            console.log('Current URL:', window.location.href);
+
+
+            // Get the chat ID from the URL
+            const urlParts = path.split('/');
+            const currentChatId = urlParts[urlParts.length - 1];
+
+            // Check if the chat ID matches our expected format
+            if (/^\d{8}_\d{6}$/.test(currentChatId)) {
+                console.log('Valid chat ID found:', currentChatId);
+                chatId = currentChatId;
+                connectWebSocket();
+            } else {
+                console.log('Invalid chat ID format, redirecting to new chat');
+                window.location.href = '/chat/new';
+            }
+        </script>
+    </body>
+
+</html>
