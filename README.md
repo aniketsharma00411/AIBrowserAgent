@@ -38,9 +38,12 @@ uvicorn main:app --reload
 ## API Endpoints
 
 ### Interact API
-- POST `/api/interact`
+- `POST /api/interact`
   - Accepts natural language commands
   - Runs the automation
+- `POST /api/extract`
+  - Accepts natural language commands
+  - Extracts the requested data and returns as a JSON object
 
 ## Example Usage
 
@@ -50,5 +53,9 @@ import requests
 # Example interaction
 response = requests.post("http://localhost:8000/api/interact", 
     json={"command": "Go to google.com and search for 'aniket sharma' and open his LinkedIn page"})
+print(response.json())
+
+response = requests.post("http://localhost:8000/api/extract",
+                         json={"query": "Get all the links on the page"})
 print(response.json())
 ```
