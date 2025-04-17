@@ -6,9 +6,11 @@ An AI-powered browser automation agent that can control your browser using natur
 
 - **Interactive Chat Interface**: Real-time communication with the AI agent through a web-based chat interface
 - **Browser Automation**: Execute browser commands and extract data from web pages
+- **LangChain Integration**: Structured output parsing and improved AI decision-making
 - **Chat History Management**: Persistent storage of chat history using MongoDB
 - **Process Repetition**: Ability to repeat previous chat processes with a new agent
 - **WebSocket Communication**: Real-time updates and responses through WebSocket connections
+- **Robust Page Waiting**: Enhanced page loading mechanisms to improve reliability
 
 ## Prerequisites
 
@@ -16,6 +18,7 @@ An AI-powered browser automation agent that can control your browser using natur
 - MongoDB
 - OpenAI API key
 - Anaconda (for Python environment)
+
 ## Installation
 
 1. Clone the repository:
@@ -31,8 +34,9 @@ conda env create -n browser_automation --file=environments.yml python=3.13.2
 If the above fails because of version issues:
 ```bash
 conda create -n browser_automation python=3.13.2
-conda install openai
 conda install fastapi
+pip install langchain
+pip install -qU "langchain[openai]"
 pip install playwright 
 pip install playwright-stealth
 conda install uvicorn 
@@ -148,7 +152,8 @@ Note: The main application must be running for the WebSocket connection to work 
 - **Frontend**: HTML/JavaScript
 - **Backend**: FastAPI
 - **Database**: MongoDB
-- **Browser Agent**: Playwright
+- **Browser Agent**: Playwright with stealth mode
+- **LLM Integration**: LangChain with structured outputs
 
 ## API Endpoints
 
@@ -173,3 +178,5 @@ The system includes comprehensive error handling for:
 - Browser automation errors
 - API request failures
 - Invalid message formats
+- Page loading timeouts
+- Selector not found scenarios

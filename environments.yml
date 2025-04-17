@@ -8,9 +8,12 @@ dependencies:
   - bzip2=1.0.8=h80987f9_6
   - ca-certificates=2025.2.25=hca03da5_0
   - certifi=2025.1.31=py313hca03da5_0
+  - cffi=1.17.1=py313h3eb5a62_1
   - charset-normalizer=3.3.2=pyhd3eb1b0_0
   - click=8.1.7=py313hca03da5_0
+  - cryptography=44.0.1=py313h8026fc7_0
   - distro=1.9.0=py313hca03da5_0
+  - dnspython=2.4.2=py313hca03da5_0
   - expat=2.6.4=h313beb8_0
   - fastapi=0.112.2=py313hca03da5_0
   - h11=0.14.0=py313hca03da5_0
@@ -22,11 +25,13 @@ dependencies:
   - libffi=3.4.4=hca03da5_1
   - libmpdec=4.0.0=h80987f9_0
   - ncurses=6.4=h313beb8_0
-  - openai=1.60.1=py313hca03da5_0
   - openssl=3.0.16=h02f6b3c_0
   - pip=25.0=py313hca03da5_0
+  - psutil=5.9.0=py313h80987f9_1
+  - pycparser=2.21=pyhd3eb1b0_0
   - pydantic=2.10.3=py313hca03da5_0
   - pydantic-core=2.27.1=py313h2aea54e_0
+  - pymongo=4.8.0=py313h80987f9_0
   - pysocks=1.7.1=py313hca03da5_0
   - python=3.13.2=h4862095_100_cp313
   - python_abi=3.13=0_cp313
@@ -43,14 +48,32 @@ dependencies:
   - tzdata=2025a=h04d1e81_0
   - urllib3=2.3.0=py313hca03da5_0
   - uvicorn=0.32.1=py313hca03da5_0
+  - websockets=10.4=py313h80987f9_2
   - wheel=0.45.1=py313hca03da5_0
   - xz=5.6.4=h80987f9_1
   - zlib=1.2.13=h18a0788_1
   - pip:
       - dotenv==0.9.9
       - greenlet==3.1.1
+      - jsonpatch==1.33
+      - jsonpointer==3.0.0
+      - langchain==0.3.23
+      - langchain-core==0.3.54
+      - langchain-openai==0.3.14
+      - langchain-text-splitters==0.3.8
+      - langsmith==0.3.31
+      - openai==1.75.0
+      - orjson==3.10.16
+      - packaging==24.2
       - playwright==1.51.0
       - playwright-stealth==1.0.6
       - pyee==12.1.1
       - python-dotenv==1.1.0
+      - pyyaml==6.0.2
+      - regex==2024.11.6
+      - requests-toolbelt==1.0.0
+      - sqlalchemy==2.0.40
+      - tenacity==9.1.2
+      - tiktoken==0.9.0
+      - zstandard==0.23.0
 prefix: /Users/aniketsharma00411/anaconda3/envs/browser_automation

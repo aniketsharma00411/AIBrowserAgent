@@ -6,10 +6,17 @@ import os
 from datetime import datetime
 import logging
 from src.browser_agent import BrowserAgent
+from pydantic import BaseModel, Field
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.output_parsers import JsonOutputParser
 
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    filename='logs/chat_interface.log',
+                    encoding='utf-8')
 logger = logging.getLogger(__name__)
 
 # Create router instead of FastAPI app
@@ -184,6 +191,14 @@ async def get_chat_history(chat_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ChatMessageResponse(BaseModel):
+    action_type: str = Field(
+        description="Type of action to perform: 'execute' or 'extract'")
+    command: str = Field(
+        description="The command to execute or data to extract")
+    explanation: str = Field(description="Brief explanation of the decision")
+
+
 @router.post("/api/chat/{chat_id}/message")
 async def process_message(chat_id: str, message: Dict[str, str]):
     try:
@@ -207,42 +222,59 @@ async def process_message(chat_id: str, message: Dict[str, str]):
         # Get chat history for context
         browser_agent.chat_history = await chat_manager.get_chat_history(chat_id)
 
-        # Prepare messages for GPT
+        # Use LangChain to process user message and determine action
+        logger.info(
+            f"Processing message in chat {chat_id}: {user_message[:50]}...")
+
+        # Initialize LangChain chat model and parser
+        chat_model = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            temperature=0.1
+        )
+        message_parser = JsonOutputParser(pydantic_object=ChatMessageResponse)
+
+        # Create messages for LangChain
         messages = [
-            {
-                "role": "system",
-                "content": """
-                You are a browser automation assistant. Analyze the user's message and determine whether to:
-                1. Execute a browser action (using the execute_command API)
-                2. Extract data from the current page (using the extract API)
+            SystemMessage(content="""
+            You are a browser automation assistant. Analyze the user's message and determine whether to:
+            1. Execute a browser action (using the execute_command API)
+            2. Extract data from the current page (using the extract API)
                 
-                Respond with a JSON object containing:
-                {
-                    "action_type": "execute" or "extract",
-                    "command": "the command to execute" or "the data to extract"; the command will be passed to another AI model to generate a json,
-                    "explanation": "brief explanation of your decision"
-                }
-                """
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
+            Respond with structured information about the action to take:
+                "action_type": "execute" or "extract",
+                "command": "the command to execute" or "the data to extract"; the command will be passed to another AI model to take action,
+                "explanation": "brief explanation of your decision"
+            """)
         ]
 
-        # Get response from GPT using browser_agent's client
-        response = browser_agent.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages
-        )
+        # Add the user's message
+        messages.append(HumanMessage(content=user_message))
+
+        # Add context from chat history (last 5 messages)
+        chat_context = browser_agent.chat_history[-5:
+                                                  ] if browser_agent.chat_history else []
+        for msg in chat_context:
+            if msg.get("role") == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg.get("role") == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
+
+        # Create and execute chain
+        chain = chat_model | message_parser
 
         try:
-            decision = json.loads(response.choices[0].message.content.strip())
+            # Execute the chain and get structured output
+            decision = chain.invoke(messages)
+
+            logger.info(f"Decision: {decision}")
 
             # Execute the appropriate action
             if decision["action_type"] == "execute":
+                logger.info(f"Executing command: {decision["command"]}")
                 result = await browser_agent.execute_command(decision["command"])
             else:  # extract
+                logger.info(f"Extracting data: {decision["command"]}")
                 result = await browser_agent.extract(decision["command"])
 
             # Save assistant's response
@@ -250,23 +282,25 @@ async def process_message(chat_id: str, message: Dict[str, str]):
                 chat_id,
                 "assistant",
                 json.dumps({
-                    "decision": decision,
+                    "action_type": decision["action_type"],
+                    "command": decision["command"],
+                    "explanation": decision["explanation"],
                     "result": result
                 })
             )
 
             return {
                 "status": "success",
-                "decision": decision,
+                "decision": {
+                    "action_type": decision["action_type"],
+                    "command": decision["command"],
+                    "explanation": decision["explanation"]
+                },
                 "result": result
             }
 
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=500, detail="Invalid response from GPT")
         except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Error executing command: {str(e)}")
+            logger.error(f"Error executing command: {str(e)}")
 
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
